@@ -6,7 +6,8 @@ import {
   setPrizes,
   showPrizeList,
   setPrizeData,
-  resetPrize
+  resetPrize,
+  defaultType
 } from "./prizeList";
 import { NUMBER_MATRIX } from "./config.js";
 
@@ -21,6 +22,7 @@ let TOTAL_CARDS,
     lottery: document.querySelector("#lottery")
   },
   prizes,
+  department_prizes=[],//部门最大中奖人数
   EACH_COUNT,
   ROW_COUNT = 7,
   COLUMN_COUNT = 17,
@@ -46,8 +48,10 @@ let selectedCardIndex = [],
   basicData = {
     prizes: [], //奖品信息
     users: [], //所有人员
-    luckyUsers: {}, //已中奖人员
-    leftUsers: [] //未中奖人员
+    luckyUsers: {}, //按奖项汇总的已中奖人员
+    leftUsers: [], //未中奖人员
+    allLuckyUsers:[],//所有已中奖人员
+    participants:[]//实际参与抽奖人员
   },
   interval,
   // 当前抽的奖项，从最低奖开始抽，直到抽到大奖
@@ -66,12 +70,15 @@ function initAll() {
   window.AJAX({
     url: "/getTempData",
     success(data) {
+      console.log("initAll");
       // 获取基础数据
       prizes = data.cfgData.prizes;
       EACH_COUNT = data.cfgData.EACH_COUNT;
       COMPANY = data.cfgData.COMPANY;
       HIGHLIGHT_CELL = createHighlight();
       basicData.prizes = prizes;
+      department_prizes=data.cfgData.department_prizes;
+
       setPrizes(prizes);
 
       TOTAL_CARDS = ROW_COUNT * COLUMN_COUNT;
@@ -80,7 +87,15 @@ function initAll() {
       basicData.leftUsers = data.leftUsers;
       basicData.luckyUsers = data.luckyData;
 
+
       let prizeIndex = basicData.prizes.length - 1;
+      for (; prizeIndex > -1; prizeIndex--) {
+        if (data.luckyData[prizeIndex]) {
+          basicData.allLuckyUsers= basicData.allLuckyUsers.concat(data.luckyData[prizeIndex]);
+        }
+      }
+      console.log(basicData.allLuckyUsers);
+      prizeIndex = basicData.prizes.length - 1;
       for (; prizeIndex > -1; prizeIndex--) {
         if (
           data.luckyData[prizeIndex] &&
@@ -249,6 +264,8 @@ function bindEvent() {
         currentLuckys = [];
         basicData.leftUsers = Object.assign([], basicData.users);
         basicData.luckyUsers = {};
+        basicData.allLuckyUsers=[];
+        basicData.participants=[];
         currentPrizeIndex = basicData.prizes.length - 1;
         currentPrize = basicData.prizes[currentPrizeIndex];
 
@@ -633,10 +650,30 @@ function lottery() {
       leftCount = basicData.leftUsers.length;
     }
 
-    for (let i = 0; i < perCount; i++) {
+    while (currentLuckys.length< perCount) {
+      basicData.participants=basicData.leftUsers.slice();
+      if (currentPrize.type !==defaultType && 
+        department_prizes.length > 0 ){
+        department_prizes.forEach(department => {
+
+          let savedDepartmentLuckyUsers=basicData.allLuckyUsers.filter(item=>item[2]==department.name)//获取部门已确认中奖人员
+          let currentDepartmentLuckyUsers=currentLuckys.filter(item=>item[2]==department.name)//获取部门当前轮次已中奖人员
+
+          let departmentLuckyUserQuantity=(savedDepartmentLuckyUsers?savedDepartmentLuckyUsers.length:0)+(currentDepartmentLuckyUsers?currentDepartmentLuckyUsers.length:0);
+
+          if(departmentLuckyUserQuantity>=department.quantity){
+            basicData.participants=basicData.participants.filter(function(item){
+              return item[2]!==department.name;
+            })
+          }
+        });
+      }
+      leftCount=basicData.participants.length;
+
       let luckyId = random(leftCount);
-      currentLuckys.push(basicData.leftUsers.splice(luckyId, 1)[0]);
-      leftCount--;
+      let currentLuckyUser=basicData.participants.splice(luckyId,1)[0];
+      basicData.leftUsers.splice(basicData.leftUsers.indexOf(currentLuckyUser),1);
+      currentLuckys.push(currentLuckyUser);
       leftPrizeCount--;
 
       let cardIndex = random(TOTAL_CARDS);
@@ -650,7 +687,8 @@ function lottery() {
       }
     }
 
-    // console.log(currentLuckys);
+   console.log(currentLuckys);
+   console.log(basicData.luckyUsers);
     selectCard();
   });
 }
@@ -665,11 +703,14 @@ function saveData() {
   }
 
   let type = currentPrize.type,
-    curLucky = basicData.luckyUsers[type] || [];
+    curLucky = basicData.luckyUsers[type] || [],
+    allLuckyUsers=basicData.allLuckyUsers||[];
 
   curLucky = curLucky.concat(currentLuckys);
-
   basicData.luckyUsers[type] = curLucky;
+
+  allLuckyUsers=allLuckyUsers.concat(currentLuckys);
+  basicData.allLuckyUsers=allLuckyUsers;
 
   if (currentPrize.count <= curLucky.length) {
     currentPrizeIndex--;

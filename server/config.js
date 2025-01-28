@@ -72,10 +72,33 @@ const EACH_COUNT = [1, 1, 5, 6, 7, 8, 9, 10];
 /**
  * 卡片公司名称标识
  */
-const COMPANY = "MoShang";
-
+const COMPANY = "DDSLAB";
+/**
+ * 部门最大中奖人数
+ * department: 部门
+ * quantity: 中奖数量
+ */
+const department_prizes = [
+  {
+    name:"WTA",
+    quantity:14
+  },
+  {
+    name:"红楼梦",
+    quantity:15
+  },
+  {
+    name:"ATP",
+    quantity:13
+  },
+  {
+    name:"MUSIC",
+    quantity:5
+  }
+]
 module.exports = {
   prizes,
   EACH_COUNT,
-  COMPANY
+  COMPANY,
+  department_prizes
 };

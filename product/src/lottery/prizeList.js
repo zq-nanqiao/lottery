@@ -310,5 +310,6 @@ export {
   addDanMu,
   setPrizes,
   resetPrize,
-  addQipao
+  addQipao,
+  defaultType
 };

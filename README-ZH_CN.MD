@@ -224,6 +224,53 @@ const COMPANY = "MoShang";
 
 ​		这将启动一个Docker Compose堆栈，并将该项目部署在其中。请注意，此处将容器的8888端口和443端口映射		到了服务器上的8888端口和443端口。如果您希望使用其他端口，请相应地更改`docker-compose.yml`文件。
 
+### 生产部署:PM2配置
+
+1. 创建PM2配置文件`ecosystem.config.js`
+
+```Js
+module.exports = {
+  apps: [{
+    name: 'lottery-system',
+    script: '..\\..\\server\\index.js',
+    args: '8888 n',//n:启动服务时不需要打开浏览器，server.js中，当参数为n时openBrowser=false
+    cwd: __dirname,//配置文件所在的目录作为Node.js应用运行时的工作目录，配置文件放在dist下
+    instances: 1,
+    autorestart: true,
+    watch: false,
+    max_memory_restart: '1G',
+    env: {
+      NODE_ENV: 'production'
+    }
+  }]
+};
+```
+
+2. 
+
+```
+# 启动应用
+pm2 start ecosystem.config.js
+
+# 停止应用
+pm2 stop lottery-system
+
+# 重启应用
+pm2 restart lottery-system
+
+# 删除应用
+pm2 delete lottery-system
+
+# 重新加载应用（零停机重启）
+pm2 reload lottery-system
+
+# 查看PM2管理的所有进程
+pm2 list
+
+# 检查状态
+pm2 status
+```
+
 
 
 ## License

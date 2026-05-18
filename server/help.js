@@ -137,11 +137,200 @@ function shuffle(arr) {
   }
 }
 
+/**
+ * 保存签到数据
+ * @param {Map} data
+ */
+function saveCheckinData(data) {
+  let obj = Array.from(data.entries());
+  let json = JSON.stringify(obj, "", 2);
+  return new Promise((resolve, reject) => {
+    fs.writeFile(path.join(cwd, "checkin.json"), json, err => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve();
+      console.log("签到数据写入成功");
+    });
+  });
+}
+
+/**
+ * 读取签到数据
+ */
+function loadCheckinData() {
+  return new Promise((resolve, reject) => {
+    fs.readFile(path.join(cwd, "checkin.json"), "utf8", (err, data) => {
+      if (err) {
+        resolve(new Map());
+        return;
+      }
+      try {
+        let entries = JSON.parse(data);
+        resolve(new Map(entries));
+      } catch (e) {
+        resolve(new Map());
+      }
+    });
+  });
+}
+
+/**
+ * 清除签到数据文件
+ */
+function clearCheckinData() {
+  let filePath = path.join(cwd, "checkin.json");
+  return new Promise((resolve, reject) => {
+    if (fs.existsSync(filePath)) {
+      fs.unlink(filePath, err => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve();
+        console.log("签到数据已清除");
+      });
+    } else {
+      resolve();
+    }
+  });
+}
+
+/**
+ * 保存抽奖状态
+ */
+function saveLotteryStatus() {
+  return new Promise((resolve, reject) => {
+    fs.writeFile(
+      path.join(cwd, "lottery_status.json"),
+      JSON.stringify({ started: true }),
+      err => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve();
+        console.log("抽奖状态已持久化");
+      }
+    );
+  });
+}
+
+/**
+ * 读取抽奖状态
+ */
+function loadLotteryStatus() {
+  return new Promise((resolve, reject) => {
+    fs.readFile(path.join(cwd, "lottery_status.json"), "utf8", (err, data) => {
+      if (err) {
+        resolve(false);
+        return;
+      }
+      try {
+        resolve(JSON.parse(data).started === true);
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  });
+}
+
+/**
+ * 清除抽奖状态文件
+ */
+function clearLotteryStatus() {
+  let filePath = path.join(cwd, "lottery_status.json");
+  return new Promise((resolve, reject) => {
+    if (fs.existsSync(filePath)) {
+      fs.unlink(filePath, err => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve();
+        console.log("抽奖状态已清除");
+      });
+    } else {
+      resolve();
+    }
+  });
+}
+
+/**
+ * 保存报名状态
+ */
+function saveRegistrationStatus(open) {
+  return new Promise((resolve, reject) => {
+    fs.writeFile(
+      path.join(cwd, "registration_status.json"),
+      JSON.stringify({ open }),
+      err => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve();
+        console.log(`报名状态已持久化: ${open ? "开启" : "关闭"}`);
+      }
+    );
+  });
+}
+
+/**
+ * 读取报名状态
+ */
+function loadRegistrationStatus() {
+  return new Promise((resolve, reject) => {
+    fs.readFile(path.join(cwd, "registration_status.json"), "utf8", (err, data) => {
+      if (err) {
+        resolve(false);
+        return;
+      }
+      try {
+        resolve(JSON.parse(data).open === true);
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  });
+}
+
+/**
+ * 清除报名状态文件
+ */
+function clearRegistrationStatus() {
+  let filePath = path.join(cwd, "registration_status.json");
+  return new Promise((resolve, reject) => {
+    if (fs.existsSync(filePath)) {
+      fs.unlink(filePath, err => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve();
+        console.log("报名状态已清除");
+      });
+    } else {
+      resolve();
+    }
+  });
+}
+
 module.exports = {
   loadTempData,
   loadXML,
   shuffle,
   writeXML,
   saveDataFile,
-  saveErrorDataFile
+  saveErrorDataFile,
+  saveCheckinData,
+  loadCheckinData,
+  clearCheckinData,
+  saveLotteryStatus,
+  loadLotteryStatus,
+  clearLotteryStatus,
+  saveRegistrationStatus,
+  loadRegistrationStatus,
+  clearRegistrationStatus
 };

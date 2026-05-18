@@ -69,6 +69,18 @@ module.exports = {
       {
         from: "./src/lib",
         to: "./lib"
+      },
+      {
+        from: "./src/join.html",
+        to: "./join.html"
+      },
+      {
+        from: "./src/controller.html",
+        to: "./controller.html"
+      },
+      {
+        from: "./src/config.html",
+        to: "./config.html"
       }
     ])
   ]

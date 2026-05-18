@@ -8,97 +8,67 @@
  */
 const prizes = [
   {
-    type: 0,
-    count: 1000,
-    title: "",
-    text: "特别奖"
+    "type": 0,
+    "text": "特别奖",
+    "title": "",
+    "count": 1000,
+    "img": ""
   },
   {
-    type: 1,
-    count: 2,
-    text: "特等奖",
-    title: "神秘大礼",
-    img: "../img/secrit.jpg"
+    "type": 1,
+    "text": "一等奖",
+    "title": "7000元购物卡",
+    "count": 5,
+    "img": "../img/nesting.png"
   },
   {
-    type: 2,
-    count: 5,
-    text: "一等奖",
-    title: "Mac Pro",
-    img: "../img/mbp.jpg"
+    "type": 2,
+    "text": "二等奖",
+    "title": "5000元购物卡",
+    "count": 20,
+    "img": "../img/图片1.png"
   },
   {
-    type: 3,
-    count: 6,
-    text: "二等奖",
-    title: "华为 Mate30",
-    img: "../img/huawei.png"
+    "type": 3,
+    "text": "三等奖",
+    "title": "3000元购物卡",
+    "count": 20,
+    "img": "../img/nesting.png"
   },
   {
-    type: 4,
-    count: 7,
-    text: "三等奖",
-    title: "Ipad Mini5",
-    img: "../img/ipad.jpg"
-  },
-  {
-    type: 5,
-    count: 8,
-    text: "四等奖",
-    title: "大疆无人机",
-    img: "../img/spark.jpg"
-  },
-  {
-    type: 6,
-    count: 8,
-    text: "五等奖",
-    title: "Kindle",
-    img: "../img/kindle.jpg"
-  },
-  {
-    type: 7,
-    count: 11,
-    text: "六等奖",
-    title: "漫步者蓝牙耳机",
-    img: "../img/edifier.jpg"
+    "type": 4,
+    "text": "四等奖",
+    "title": "2000元购物卡",
+    "count": 20,
+    "img": "../img/nesting.png"
   }
 ];
 
 /**
  * 一次抽取的奖品个数与prizes对应
  */
-const EACH_COUNT = [1, 1, 5, 6, 7, 8, 9, 10];
+const EACH_COUNT = [1,2,5,5,5];
 
 /**
  * 卡片公司名称标识
  */
 const COMPANY = "DDSLAB";
+
+/**
+ * 报名可选部门（若为空则自动从可报名清单中读取）
+ */
+const DEPARTMENTS = [];
+
 /**
  * 部门最大中奖人数
  * department: 部门
  * quantity: 中奖数量
  */
-const department_prizes = [
-  {
-    name:"WTA",
-    quantity:14
-  },
-  {
-    name:"红楼梦",
-    quantity:15
-  },
-  {
-    name:"ATP",
-    quantity:13
-  },
-  {
-    name:"MUSIC",
-    quantity:5
-  }
-]
+const department_prizes = [];
 module.exports = {
   prizes,
   EACH_COUNT,
   COMPANY,
+  DEPARTMENTS,
   department_prizes
 };

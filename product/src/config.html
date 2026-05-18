@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>抽奖配置</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: linear-gradient(to bottom, #131313, #02101c);
+      color: rgba(127,255,255,0.75);
+      font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      min-height: 100vh;
+    }
+    .container {
+      padding: 16px;
+      max-width: 600px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    .header {
+      text-align: center;
+      padding: 16px 0;
+    }
+    .header h1 { font-size: 22px; color: #fff; }
+    .header p { font-size: 12px; color: rgba(127,255,255,0.4); margin-top: 4px; }
+    .section {
+      background: rgba(0,127,127,0.08);
+      border: 1px solid rgba(127,255,255,0.12);
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .section-title {
+      font-size: 14px;
+      color: rgba(127,255,255,0.6);
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(127,255,255,0.1);
+    }
+    .form-group {
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+    }
+    .form-group label {
+      width: 80px;
+      font-size: 13px;
+      color: rgba(127,255,255,0.5);
+      flex-shrink: 0;
+    }
+    .form-group input, .form-group select {
+      flex: 1;
+      padding: 10px 12px;
+      font-size: 14px;
+      background: rgba(0,127,127,0.1);
+      border: 1px solid rgba(127,255,255,0.2);
+      border-radius: 6px;
+      color: #fff;
+      outline: none;
+    }
+    .form-group input:focus {
+      border-color: rgba(127,255,255,0.5);
+    }
+    .form-group input.small { width: 60px; flex: none; text-align: center; }
+    .form-group input.mid { width: 100px; flex: none; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 6px 4px; font-size: 12px; text-align: left; border-bottom: 1px solid rgba(127,255,255,0.06); }
+    th { color: rgba(127,255,255,0.4); font-weight: normal; }
+    td input { width: 100%; padding: 6px 8px; font-size: 12px; background: rgba(0,127,127,0.1); border: 1px solid rgba(127,255,255,0.15); border-radius: 4px; color: #fff; outline: none; }
+    td input:focus { border-color: rgba(127,255,255,0.4); }
+    td input.narrow { width: 50px; }
+    .btn-row {
+      display: flex; gap: 12px; margin-top: 8px; justify-content: center;
+    }
+    .btn {
+      padding: 8px 20px; font-size: 13px; border-radius: 8px;
+      border: 1px solid rgba(127,255,255,0.25);
+      cursor: pointer; color: rgba(127,255,255,0.85);
+      background: rgba(0,127,127,0.2);
+      transition: all 0.2s;
+    }
+    .btn:active { background: rgba(0,127,127,0.5); }
+    .btn.add { border-color: rgba(0,200,100,0.3); color: #00cc66; }
+    .btn.del { border-color: rgba(200,60,60,0.3); color: #ff6666; }
+    .btn.save {
+      background: rgba(0,160,160,0.35); border-color: rgba(127,255,255,0.4);
+      font-size: 16px; padding: 12px 40px; width: 100%;
+    }
+    .message {
+      text-align: center; margin-top: 12px; padding: 10px; border-radius: 8px;
+      font-size: 14px; display: none;
+    }
+    .message.success { display: block; background: rgba(0,200,100,0.15); color: #00cc66; border: 1px solid rgba(0,200,100,0.3); }
+    .message.error { display: block; background: rgba(200,50,50,0.15); color: #ff6666; border: 1px solid rgba(200,50,50,0.3); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>抽奖配置</h1>
+      <p>修改后点击保存，将写入 config.js 文件</p>
+    </div>
+
+    <div class="section">
+      <div class="section-title">基本设置</div>
+      <div class="form-group">
+        <label>公司名称</label>
+        <input type="text" id="cfgCompany" placeholder="例如: DDSLAB">
+      </div>
+      <div class="form-group">
+        <label>可选部门</label>
+        <input type="text" id="cfgDepartments" placeholder="留空则自动从Excel读取。逗号分隔，例如: 技术部,市场部">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">奖品设置</div>
+      <table>
+        <thead>
+          <tr><th>type</th><th>奖项名称</th><th>描述</th><th>数量</th><th>图片</th><th></th></tr>
+        </thead>
+        <tbody id="prizesTable"></tbody>
+      </table>
+      <div style="margin-top:8px;">
+        <button class="btn add" id="btnAddPrize">+ 添加奖项</button>
+      </div>
+      <div class="form-group" style="margin-top:12px;">
+        <label>每次抽取</label>
+        <input type="text" id="cfgEachCount" placeholder="每个奖项每次抽取几人，逗号分隔，与奖项顺序对应。例如: 2,5,5">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">部门中奖上限（可选）</div>
+      <table>
+        <thead>
+          <tr><th>部门</th><th>上限人数</th><th></th></tr>
+        </thead>
+        <tbody id="deptLimitTable"></tbody>
+      </table>
+      <div style="margin-top:8px;">
+        <button class="btn add" id="btnAddDeptLimit">+ 添加上限</button>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn save" id="btnSave">保存配置</button>
+    </div>
+    <div id="messageBox" class="message"></div>
+  </div>
+  <input type="file" id="imgFileInput" accept="image/*" style="display:none;">
+
+  <script>
+    loadConfig();
+
+    function loadConfig() {
+      fetch("/getConfig", { method: "POST" })
+        .then(r => r.json())
+        .then(function(cfg) {
+          document.getElementById("cfgCompany").value = cfg.COMPANY || "";
+          document.getElementById("cfgDepartments").value = (cfg.DEPARTMENTS || []).join(",");
+          document.getElementById("cfgEachCount").value = (cfg.EACH_COUNT || []).join(",");
+          renderPrizes(cfg.prizes || []);
+          renderDeptLimits(cfg.department_prizes || []);
+        });
+    }
+
+    function renderPrizes(prizes) {
+      var tbody = document.getElementById("prizesTable");
+      var rows = prizes.map(function(p, i) {
+        return '<tr>' +
+          '<td><input type="number" class="narrow" value="' + (p.type != null ? p.type : i) + '" data-field="type" data-idx="' + i + '"></td>' +
+          '<td><input type="text" value="' + esc(p.text) + '" data-field="text" data-idx="' + i + '"></td>' +
+          '<td><input type="text" value="' + esc(p.title) + '" data-field="title" data-idx="' + i + '"></td>' +
+          '<td><input type="number" class="narrow" value="' + p.count + '" data-field="count" data-idx="' + i + '"></td>' +
+          '<td style="display:flex;gap:4px;"><input type="text" value="' + esc(p.img || "") + '" data-field="img" data-idx="' + i + '" style="flex:1;"><button class="btn" style="font-size:10px;padding:2px 8px;flex-shrink:0;" onclick="triggerImgSelect(' + i + ')">选择</button></td>' +
+          '<td><button class="btn del" onclick="removePrize(' + i + ')">x</button></td>' +
+          '</tr>';
+      }).join("");
+      tbody.innerHTML = rows;
+    }
+
+    function renderDeptLimits(limits) {
+      var tbody = document.getElementById("deptLimitTable");
+      var rows = (limits || []).map(function(d, i) {
+        return '<tr>' +
+          '<td><input type="text" value="' + esc(d.department) + '" data-field="department" data-idx="' + i + '"></td>' +
+          '<td><input type="number" class="narrow" value="' + d.quantity + '" data-field="quantity" data-idx="' + i + '"></td>' +
+          '<td><button class="btn del" onclick="removeDeptLimit(' + i + ')">x</button></td>' +
+          '</tr>';
+      }).join("");
+      tbody.innerHTML = rows;
+    }
+
+    function esc(s) { return (s || "").replace(/"/g, "&quot;"); }
+
+    function collectPrizes() {
+      var rows = document.querySelectorAll("#prizesTable tr");
+      var prizes = [];
+      rows.forEach(function(tr) {
+        var inputs = tr.querySelectorAll("input");
+        var prize = {};
+        inputs.forEach(function(inp) {
+          var field = inp.dataset.field;
+          var val = inp.value.trim();
+          if (field === "type" || field === "count") val = parseInt(val, 10) || 0;
+          prize[field] = val;
+        });
+        prizes.push(prize);
+      });
+      return prizes;
+    }
+
+    function collectDeptLimits() {
+      var rows = document.querySelectorAll("#deptLimitTable tr");
+      var limits = [];
+      rows.forEach(function(tr) {
+        var inputs = tr.querySelectorAll("input");
+        var limit = {};
+        inputs.forEach(function(inp) {
+          var field = inp.dataset.field;
+          var val = inp.value.trim();
+          if (field === "quantity") val = parseInt(val, 10) || 0;
+          limit[field] = val;
+        });
+        if (limit.department) limits.push(limit);
+      });
+      return limits;
+    }
+
+    document.getElementById("btnAddPrize").addEventListener("click", function() {
+      var prizes = collectPrizes();
+      var maxType = 0;
+      prizes.forEach(function(p) { if (p.type > maxType) maxType = p.type; });
+      prizes.push({ type: maxType + 1, count: 1, text: "新奖项", title: "", img: "" });
+      renderPrizes(prizes);
+    });
+
+    document.getElementById("btnAddDeptLimit").addEventListener("click", function() {
+      var limits = collectDeptLimits();
+      limits.push({ department: "", quantity: 1 });
+      renderDeptLimits(limits);
+    });
+
+    window.removePrize = function(idx) {
+      var prizes = collectPrizes();
+      prizes.splice(idx, 1);
+      renderPrizes(prizes);
+    };
+
+    window.removeDeptLimit = function(idx) {
+      var limits = collectDeptLimits();
+      limits.splice(idx, 1);
+      renderDeptLimits(limits);
+    };
+
+    window.curImgIdx = -1;
+    window.triggerImgSelect = function(idx) {
+      window.curImgIdx = idx;
+      document.getElementById("imgFileInput").click();
+    };
+
+    document.getElementById("imgFileInput").addEventListener("change", function() {
+      var file = this.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        fetch("/uploadPrizeImage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileName: file.name, data: e.target.result })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(result) {
+          if (result.type === "success") {
+            // Re-render with updated img field
+            var prizes = collectPrizes();
+            if (window.curImgIdx >= 0 && window.curImgIdx < prizes.length) {
+              prizes[window.curImgIdx].img = "../img/" + result.fileName;
+            }
+            renderPrizes(prizes);
+            showMessage("图片已上传", "success");
+          } else {
+            showMessage(result.message || "上传失败", "error");
+          }
+        })
+        .catch(function() {
+          showMessage("网络错误", "error");
+        });
+      };
+      reader.readAsDataURL(file);
+      this.value = "";
+    });
+
+    document.getElementById("btnSave").addEventListener("click", function() {
+      var eachCountStr = document.getElementById("cfgEachCount").value.trim();
+      var eachCount = eachCountStr ? eachCountStr.split(",").map(function(s) { return parseInt(s.trim(), 10) || 1; }) : [];
+      var deptStr = document.getElementById("cfgDepartments").value.trim();
+      var departments = deptStr ? deptStr.split(",").map(function(s) { return s.trim(); }).filter(Boolean) : [];
+
+      var data = {
+        COMPANY: document.getElementById("cfgCompany").value.trim(),
+        DEPARTMENTS: departments,
+        prizes: collectPrizes(),
+        EACH_COUNT: eachCount,
+        department_prizes: collectDeptLimits()
+      };
+
+      var btn = document.getElementById("btnSave");
+      btn.disabled = true;
+      btn.textContent = "保存中...";
+
+      fetch("/saveConfig", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(result) {
+        if (result.type === "success") {
+          showMessage("配置已保存，config.js 已更新", "success");
+          // 通知父窗口（如果在 iframe 中）
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage("config_saved", "*");
+          }
+        } else {
+          showMessage(result.message || "保存失败", "error");
+        }
+      })
+      .catch(function() {
+        showMessage("网络错误", "error");
+      })
+      .finally(function() {
+        btn.disabled = false;
+        btn.textContent = "保存配置";
+      });
+    });
+
+    function showMessage(text, type) {
+      var box = document.getElementById("messageBox");
+      box.textContent = text;
+      box.className = "message " + (type || "");
+      if (type === "success") {
+        setTimeout(function() { box.style.display = "none"; }, 4000);
+      }
+    }
+  </script>
+</body>
+</html>

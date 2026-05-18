@@ -10,6 +10,7 @@ import {
   defaultType
 } from "./prizeList";
 import { NUMBER_MATRIX } from "./config.js";
+import { io } from "socket.io-client";
 
 const ROTATE_TIME = 3000;
 const ROTATE_LOOP = 1000;
@@ -59,7 +60,16 @@ let selectedCardIndex = [],
   currentPrize,
   // 正在抽奖
   isLotting = false,
-  currentLuckys = [];
+  currentLuckys = [],
+  stopTriggered = false,
+  socket = null,
+  qrDataURL = null,
+  connectionInfo = null,
+  stateUpdateTimer = null,
+  isLotteryStarted = false,
+  isRegistrationOpen = false,
+  totalUsers = 0,
+  recentJoins = [];
 
 initAll();
 
@@ -78,8 +88,15 @@ function initAll() {
       HIGHLIGHT_CELL = createHighlight();
       basicData.prizes = prizes;
       department_prizes=data.cfgData.department_prizes;
+      qrDataURL = data.qrDataURL || null;
+      connectionInfo = data.connectionInfo || null;
+      totalUsers = data.checkedInCount || data.totalUsers || 0;
+      recentJoins = data.recentParticipants || [];
+      isLotteryStarted = data.isLotteryStarted || false;
+      isRegistrationOpen = data.isRegistrationOpen || false;
 
       setPrizes(prizes);
+      initWebSocket();
 
       TOTAL_CARDS = ROW_COUNT * COLUMN_COUNT;
 
@@ -134,7 +151,6 @@ function initCards() {
     length = member.length;
 
   let isBold = false,
-    showTable = basicData.leftUsers.length === basicData.users.length,
     index = 0,
     totalMember = member.length,
     position = {
@@ -159,7 +175,7 @@ function initCards() {
         member[index % length],
         isBold,
         index,
-        showTable
+        true
       );
 
       var object = new THREE.CSS3DObject(element);
@@ -206,11 +222,7 @@ function initCards() {
 
   bindEvent();
 
-  if (showTable) {
-    switchScreen("enter");
-  } else {
-    switchScreen("lottery");
-  }
+  switchScreen("enter");
 }
 
 function setLotteryStatus(status = false) {
@@ -226,8 +238,15 @@ function bindEvent() {
     // 如果正在抽奖，则禁止一切操作
     if (isLotting) {
       if (e.target.id === "lottery") {
-        rotateObj.stop();
+        stopTriggered = true;
+        if (rotateObj && rotateObj.stop) {
+          rotateObj.stop();
+        }
+        scene.rotation.y = 0;
         btns.lottery.innerHTML = "开始抽奖";
+        selectWinners();
+        selectCard();
+        notifyStateChange();
       } else {
         addQipao("正在抽奖，抽慢一点点～～");
       }
@@ -248,30 +267,44 @@ function bindEvent() {
         // rotate = !rotate;
         rotate = true;
         switchScreen("lottery");
+        isLotteryStarted = true;
+        if (socket && socket.connected) {
+          socket.emit("display:lottery_entered");
+        }
         break;
       // 重置
       case "reset":
-        let doREset = window.confirm(
-          "是否确认重置数据，重置后，当前已抽的奖项全部清空？"
-        );
-        if (!doREset) {
-          return;
-        }
-        addQipao("重置所有数据，重新抽奖");
-        addHighlight();
-        resetCard();
-        // 重置所有数据
-        currentLuckys = [];
-        basicData.leftUsers = Object.assign([], basicData.users);
-        basicData.luckyUsers = {};
-        basicData.allLuckyUsers=[];
-        basicData.participants=[];
-        currentPrizeIndex = basicData.prizes.length - 1;
-        currentPrize = basicData.prizes[currentPrizeIndex];
+        showConfirm("是否确认重置数据？\n重置后，当前已抽的奖项全部清空。").then(function(confirmed) {
+          if (!confirmed) return;
+          addQipao("重置所有数据，重新抽奖");
+          addHighlight();
+          resetCard();
+          // 重置所有数据
+          currentLuckys = [];
+          basicData.luckyUsers = {};
+          basicData.allLuckyUsers=[];
+          basicData.participants=[];
+          currentPrizeIndex = basicData.prizes.length - 1;
+          currentPrize = basicData.prizes[currentPrizeIndex];
 
-        resetPrize(currentPrizeIndex);
-        reset();
-        switchScreen("enter");
+          resetPrize(currentPrizeIndex);
+          reset();
+          totalUsers = 0;
+          recentJoins = [];
+          isLotteryStarted = false;
+          isRegistrationOpen = false;
+          window.AJAX({
+            url: "/getUsers",
+            success(data) {
+              basicData.users = data;
+              basicData.leftUsers = Object.assign([], data);
+            }
+          });
+          switchScreen("enter");
+          if (socket && socket.connected) {
+            socket.emit("display:lottery_reset");
+          }
+        });
         break;
       // 抽奖
       case "lottery":
@@ -302,6 +335,16 @@ function bindEvent() {
           lottery();
         });
         break;
+      // 手动保存本轮抽奖结果
+      case "saveData":
+        if (currentLuckys.length === 0) {
+          addQipao(`本轮还没有抽奖结果，无法保存~~`);
+          return;
+        }
+        saveData().then(() => {
+          addQipao(`本轮抽奖结果已保存，可以放心刷新了`);
+        });
+        break;
       // 导出抽奖结果
       case "save":
         saveData().then(res => {
@@ -313,6 +356,22 @@ function bindEvent() {
           addQipao(`数据已保存到EXCEL中。`);
         });
         break;
+      // 显示/隐藏二维码
+      case "qrCode":
+        toggleQRDisplay();
+        break;
+      // 打开可视化配置页面
+      case "config":
+        toggleConfigModal();
+        break;
+      // 导入用户列表
+      case "importUsers":
+        document.querySelector("#usersFileInput").click();
+        break;
+      // 管理抽奖结果
+      case "manageResults":
+        toggleManageResults();
+        break;
     }
   });
 
@@ -320,15 +379,18 @@ function bindEvent() {
 }
 
 function switchScreen(type) {
+  var topBar = document.querySelector("#topBar");
   switch (type) {
     case "enter":
       btns.enter.classList.remove("none");
       btns.lotteryBar.classList.add("none");
+      if (topBar) topBar.style.display = "flex";
       transform(targets.table, 2000);
       break;
     default:
       btns.enter.classList.add("none");
       btns.lotteryBar.classList.remove("none");
+      if (topBar) topBar.style.display = "none";
       transform(targets.sphere, 2000);
       break;
   }
@@ -569,6 +631,7 @@ function selectCard(duration = 600) {
     .onComplete(() => {
       // 动画结束后可以操作
       setLotteryStatus();
+      notifyStateChange();
     });
 }
 
@@ -628,69 +691,79 @@ function resetCard(duration = 500) {
  * 抽奖
  */
 function lottery() {
-  // if (isLotting) {
-  //   rotateObj.stop();
-  //   btns.lottery.innerHTML = "开始抽奖";
-  //   return;
-  // }
   btns.lottery.innerHTML = "结束抽奖";
+  stopTriggered = false;
   rotateBall().then(() => {
-    // 将之前的记录置空
-    currentLuckys = [];
-    selectedCardIndex = [];
-    // 当前同时抽取的数目,当前奖品抽完还可以继续抽，但是不记录数据
-    let perCount = EACH_COUNT[currentPrizeIndex],
-      luckyData = basicData.luckyUsers[currentPrize.type],
-      leftCount = basicData.leftUsers.length,
-      leftPrizeCount = currentPrize.count - (luckyData ? luckyData.length : 0);
-
-    if (leftCount < perCount) {
-      addQipao("剩余参与抽奖人员不足，现在重新设置所有人员可以进行二次抽奖！");
-      basicData.leftUsers = basicData.users.slice();
-      leftCount = basicData.leftUsers.length;
-    }
-
-    while (currentLuckys.length< perCount) {
-      basicData.participants=basicData.leftUsers.slice();
-      if (currentPrize.type !==defaultType && 
-        department_prizes.length > 0 ){
-        department_prizes.forEach(department => {
-
-          let savedDepartmentLuckyUsers=basicData.allLuckyUsers.filter(item=>item[2]==department.name)//获取部门已确认中奖人员
-          let currentDepartmentLuckyUsers=currentLuckys.filter(item=>item[2]==department.name)//获取部门当前轮次已中奖人员
-
-          let departmentLuckyUserQuantity=(savedDepartmentLuckyUsers?savedDepartmentLuckyUsers.length:0)+(currentDepartmentLuckyUsers?currentDepartmentLuckyUsers.length:0);
-
-          if(departmentLuckyUserQuantity>=department.quantity){
-            basicData.participants=basicData.participants.filter(function(item){
-              return item[2]!==department.name;
-            })
-          }
-        });
-      }
-      leftCount=basicData.participants.length;
-
-      let luckyId = random(leftCount);
-      let currentLuckyUser=basicData.participants.splice(luckyId,1)[0];
-      basicData.leftUsers.splice(basicData.leftUsers.indexOf(currentLuckyUser),1);
-      currentLuckys.push(currentLuckyUser);
-      leftPrizeCount--;
-
-      let cardIndex = random(TOTAL_CARDS);
-      while (selectedCardIndex.includes(cardIndex)) {
-        cardIndex = random(TOTAL_CARDS);
-      }
-      selectedCardIndex.push(cardIndex);
-
-      if (leftPrizeCount === 0) {
-        break;
-      }
-    }
-
-   console.log(currentLuckys);
-   console.log(basicData.luckyUsers);
+    if (stopTriggered) return;
+    selectWinners();
     selectCard();
   });
+}
+
+/**
+ * 选取中奖者
+ */
+function selectWinners() {
+  currentLuckys = [];
+  selectedCardIndex = [];
+  // 当前同时抽取的数目,当前奖品抽完还可以继续抽，但是不记录数据
+  let perCount = EACH_COUNT[currentPrizeIndex],
+    luckyData = basicData.luckyUsers[currentPrize.type],
+    leftCount = basicData.leftUsers.length,
+    leftPrizeCount = currentPrize.count - (luckyData ? luckyData.length : 0);
+
+  if (leftCount < perCount) {
+    addQipao("剩余参与抽奖人员不足，现在重新设置所有人员可以进行二次抽奖！");
+    var allLuckyIds = {};
+    (basicData.allLuckyUsers || []).forEach(function(u) { allLuckyIds[u[0]] = true; });
+    basicData.leftUsers = basicData.users.slice().filter(function(u) {
+      return !allLuckyIds[u[0]];
+    });
+    leftCount = basicData.leftUsers.length;
+  }
+
+  while (currentLuckys.length < perCount) {
+    basicData.participants = basicData.leftUsers.slice();
+    if (currentPrize.type !== defaultType && department_prizes.length > 0) {
+      department_prizes.forEach(department => {
+        let savedDepartmentLuckyUsers = basicData.allLuckyUsers.filter(item => item[2] == department.department);
+        let currentDepartmentLuckyUsers = currentLuckys.filter(item => item[2] == department.department);
+        let departmentLuckyUserQuantity = (savedDepartmentLuckyUsers ? savedDepartmentLuckyUsers.length : 0) + (currentDepartmentLuckyUsers ? currentDepartmentLuckyUsers.length : 0);
+        if (departmentLuckyUserQuantity >= department.quantity) {
+          basicData.participants = basicData.participants.filter(function(item) {
+            return item[2] !== department.department;
+          });
+        }
+      });
+    }
+    leftCount = basicData.participants.length;
+
+    if (leftCount === 0) {
+      addQipao("没有更多可参与抽奖的人员了");
+      break;
+    }
+
+    let luckyId = random(leftCount);
+    let currentLuckyUser = basicData.participants.splice(luckyId, 1)[0];
+    basicData.leftUsers.splice(basicData.leftUsers.indexOf(currentLuckyUser), 1);
+    currentLuckys.push(currentLuckyUser);
+    leftPrizeCount--;
+
+    let cardIndex = random(TOTAL_CARDS);
+    while (selectedCardIndex.includes(cardIndex)) {
+      cardIndex = random(TOTAL_CARDS);
+    }
+    selectedCardIndex.push(cardIndex);
+
+    if (leftPrizeCount === 0) {
+      break;
+    }
+  }
+
+  console.log(currentLuckys);
+  console.log(basicData.luckyUsers);
+
+  updatePrizeDisplay();
 }
 
 /**
@@ -729,9 +802,15 @@ function saveData() {
 
 function changePrize() {
   let luckys = basicData.luckyUsers[currentPrize.type];
-  let luckyCount = (luckys ? luckys.length : 0) + EACH_COUNT[currentPrizeIndex];
+  let luckyCount = (luckys ? luckys.length : 0);
   // 修改左侧prize的数目和百分比
   setPrizeData(currentPrizeIndex, luckyCount);
+}
+
+function updatePrizeDisplay() {
+  if (!currentPrize || currentPrize.type === defaultType) return;
+  var savedCount = (basicData.luckyUsers[currentPrize.type] || []).length;
+  setPrizeData(currentPrizeIndex, savedCount + currentLuckys.length);
 }
 
 /**
@@ -862,6 +941,849 @@ function createHighlight() {
 
   return highlight;
 }
+
+function initWebSocket() {
+  let wsUrl = connectionInfo
+    ? `http://${connectionInfo.ip}:${connectionInfo.port}`
+    : window.location.origin;
+
+  socket = io(wsUrl, {
+    query: { role: "display" }
+  });
+
+  socket.on("connect", () => {
+    console.log("WebSocket connected as display");
+    // Start periodic state updates
+    if (stateUpdateTimer) clearInterval(stateUpdateTimer);
+    stateUpdateTimer = setInterval(sendStateUpdate, 3000);
+  });
+
+  socket.on("display:command", (data) => {
+    handleRemoteCommand(data);
+  });
+
+  socket.on("display:participant_joined", (data) => {
+    handleNewParticipant(data);
+  });
+
+  socket.on("display:connected", (data) => {
+    if (data && data.joinUrl) {
+      console.log("Display registered with server");
+    }
+    if (data) {
+      isLotteryStarted = data.isLotteryStarted || false;
+      isRegistrationOpen = data.isRegistrationOpen || false;
+      updateQROverlay();
+    }
+  });
+
+  socket.on("display:lottery_started", (data) => {
+    if (data) {
+      isLotteryStarted = data.started;
+      if (data.started) {
+        addQipao("抽奖已开始，报名通道关闭");
+      } else {
+        addQipao("抽奖已重置，报名通道开放");
+      }
+      updateQROverlay();
+    }
+  });
+
+  socket.on("display:registration_state", (data) => {
+    if (data) {
+      isRegistrationOpen = data.open;
+      updateQROverlay();
+    }
+  });
+
+  socket.on("display:config_updated", () => {
+    addQipao("配置已更新，正在刷新...");
+    setTimeout(() => location.reload(), 500);
+  });
+
+  socket.on("disconnect", () => {
+    console.log("WebSocket disconnected");
+    if (stateUpdateTimer) clearInterval(stateUpdateTimer);
+  });
+}
+
+function sendStateUpdate() {
+  if (!socket || !socket.connected) return;
+
+  let prizeStatuses = (basicData.prizes || []).map((prize, idx) => {
+    let lucky = basicData.luckyUsers[prize.type] || [];
+    return {
+      type: prize.type,
+      text: prize.text,
+      count: prize.count,
+      remaining: Math.max(0, prize.count - lucky.length)
+    };
+  });
+
+  socket.emit("display:state", {
+    currentPrizeIndex: currentPrizeIndex,
+    isLotting: isLotting,
+    leftCount: basicData.leftUsers ? basicData.leftUsers.length : 0,
+    currentPrize: currentPrize ? {
+      text: currentPrize.text,
+      title: currentPrize.title,
+      type: currentPrize.type
+    } : null,
+    prizeStatuses: prizeStatuses
+  });
+}
+
+function notifyStateChange() {
+  sendStateUpdate();
+}
+
+function doStartLottery() {
+  if (isLotting) return;
+  setLotteryStatus(true);
+  saveData();
+  changePrize();
+  resetCard().then(res => {
+    lottery();
+  });
+  addQipao(`正在抽取[${currentPrize.title}],调整好姿势`);
+  btns.lottery.innerHTML = "结束抽奖";
+  notifyStateChange();
+}
+
+function doStopLottery() {
+  if (!isLotting) return;
+  stopTriggered = true;
+  if (rotateObj && rotateObj.stop) {
+    rotateObj.stop();
+  }
+  scene.rotation.y = 0;
+  btns.lottery.innerHTML = "开始抽奖";
+  selectWinners();
+  selectCard();
+  notifyStateChange();
+}
+
+function doReset() {
+  if (isLotting) return;
+  addQipao("重置所有数据，重新抽奖");
+  addHighlight();
+  resetCard();
+  currentLuckys = [];
+  basicData.luckyUsers = {};
+  basicData.allLuckyUsers=[];
+  basicData.participants=[];
+  currentPrizeIndex = basicData.prizes.length - 1;
+  currentPrize = basicData.prizes[currentPrizeIndex];
+  resetPrize(currentPrizeIndex);
+  reset();
+  totalUsers = 0;
+  recentJoins = [];
+  isLotteryStarted = false;
+  isRegistrationOpen = false;
+  // 重新从服务器获取人员列表
+  window.AJAX({
+    url: "/getUsers",
+    success(data) {
+      basicData.users = data;
+      basicData.leftUsers = Object.assign([], data);
+    }
+  });
+  switchScreen("enter");
+  if (socket && socket.connected) {
+    socket.emit("display:lottery_reset");
+  }
+  notifyStateChange();
+}
+
+function doReLottery() {
+  if (isLotting) return;
+  if (currentLuckys.length === 0) {
+    addQipao(`当前还没有抽奖，无法重新抽取喔~~`);
+    return;
+  }
+  setErrorData(currentLuckys);
+  addQipao(`重新抽取[${currentPrize.title}],做好准备`);
+  setLotteryStatus(true);
+  resetCard().then(res => {
+    lottery();
+  });
+  notifyStateChange();
+}
+
+function doSaveData() {
+  if (isLotting) return;
+  if (currentLuckys.length === 0) {
+    addQipao("本轮还没有抽奖结果，无法保存~~");
+    return;
+  }
+  saveData().then(() => {
+    addQipao("本轮抽奖结果已保存，可以放心刷新了");
+  });
+}
+
+function doExport() {
+  if (isLotting) return;
+  saveData().then(res => {
+    resetCard().then(res => {
+      currentLuckys = [];
+    });
+    exportData();
+    addQipao(`数据已保存到EXCEL中。`);
+  });
+}
+
+function handleRemoteCommand(data) {
+  let { action } = data;
+  if (!action) return;
+
+  switch (action) {
+    case "enter":
+      if (!isLotting) document.querySelector("#enter").click();
+      break;
+    case "start":
+    case "toggle":
+      doStartLottery();
+      break;
+    case "stop":
+      doStopLottery();
+      break;
+    case "reset":
+      doReset();
+      break;
+    case "relottery":
+      doReLottery();
+      break;
+    case "export":
+      doExport();
+      break;
+    case "saveData":
+      doSaveData();
+      break;
+    case "toggleQR":
+      toggleQRDisplay();
+      break;
+    case "manageResults":
+      toggleManageResults();
+      break;
+    case "registrationStart":
+      if (socket && socket.connected) socket.emit("display:registration_started");
+      break;
+    case "registrationEnd":
+      if (socket && socket.connected) socket.emit("display:registration_ended");
+      break;
+  }
+}
+
+function handleNewParticipant(data) {
+  if (!data || !data.user) return;
+  let user = data.user;
+
+  // 从服务端重新拉取，确保只有已签到的人进入抽奖池
+  window.AJAX({
+    url: "/getUsers",
+    success(users) {
+      basicData.users = users;
+    }
+  });
+  window.AJAX({
+    url: "/getTempData",
+    success(tempData) {
+      basicData.leftUsers = tempData.leftUsers;
+    }
+  });
+
+  totalUsers = data.checkedInCount || data.totalUsers || totalUsers;
+  recentJoins = data.recentParticipants || recentJoins;
+
+  addQipao(`${user[1]} 报名成功`);
+
+  // Show new user on a random card
+  let totalCards = threeDCards.length;
+  if (totalCards > 0) {
+    let randomIdx = Math.floor(Math.random() * totalCards);
+    if (!selectedCardIndex.includes(randomIdx)) {
+      changeCard(randomIdx, user);
+    }
+  }
+
+  updateQROverlay();
+  notifyStateChange();
+}
+
+function buildJoinFeedHTML() {
+  let list = (recentJoins || []).slice(0, 10);
+  if (list.length === 0) {
+    return '<div class="qr-join-empty">等待报名...</div>';
+  }
+  return list.map(p => {
+    let blessingHtml = p.blessing ? ` <span class="qr-join-blessing">${p.blessing}</span>` : "";
+    return `<div class="qr-join-item"><span class="qr-join-name">${p.employeeId || ""} ${p.name}</span> 报名成功${blessingHtml}</div>`;
+  }).join("");
+}
+
+function getStatusText() {
+  if (isLotteryStarted) return "抽奖进行中，报名通道已关闭";
+  if (isRegistrationOpen) return "报名进行中，请扫码加入";
+  return "报名尚未开始";
+}
+
+function createQROverlay() {
+  let overlay = document.createElement("div");
+  overlay.id = "qrOverlay";
+  overlay.className = "qr-overlay";
+
+  let total = totalUsers || 0;
+
+  let html = '<div class="qr-panel">';
+
+  html += '<div class="qr-left">';
+  if (qrDataURL) {
+    html += `<img src="${qrDataURL}" alt="QR Code" class="qr-image">`;
+  }
+  html += `<div class="qr-status-text">${getStatusText()}</div>`;
+  html += '</div>';
+
+  html += '<div class="qr-right">';
+  html += `<div class="qr-title">加入年会抽奖</div>`;
+  if (connectionInfo) {
+    html += `<div class="qr-url">${connectionInfo.joinUrl}</div>`;
+  }
+  html += `<div class="qr-total">报名人数: <span id="qrTotalCount">${total}</span></div>`;
+  html += `<div class="qr-feed-title">报名记录</div>`;
+  html += `<div id="qrJoinFeed" class="qr-join-feed">${buildJoinFeedHTML()}</div>`;
+  html += '</div>';
+
+  html += '<div class="qr-bottom">';
+  if (isRegistrationOpen) {
+    html += '<button id="qrRegBtn" class="qr-reg-btn qr-reg-end">结束报名</button>';
+  } else {
+    html += '<button id="qrRegBtn" class="qr-reg-btn qr-reg-start">开始报名</button>';
+  }
+  html += '<button id="qrCloseBtn" class="qr-close-btn">关闭</button>';
+  html += '</div>';
+
+  html += '</div>';
+
+  overlay.innerHTML = html;
+  return overlay;
+}
+
+function updateQROverlay() {
+  let overlay = document.querySelector("#qrOverlay");
+  if (!overlay) return;
+
+  let countEl = overlay.querySelector("#qrTotalCount");
+  if (countEl) {
+    countEl.textContent = totalUsers || 0;
+  }
+
+  let feedEl = overlay.querySelector("#qrJoinFeed");
+  if (feedEl) {
+    feedEl.innerHTML = buildJoinFeedHTML();
+  }
+
+  let statusEl = overlay.querySelector(".qr-status-text");
+  if (statusEl) {
+    statusEl.textContent = getStatusText();
+  }
+
+  let regBtn = overlay.querySelector("#qrRegBtn");
+  if (regBtn) {
+    if (isRegistrationOpen) {
+      regBtn.textContent = "结束报名";
+      regBtn.className = "qr-reg-btn qr-reg-end";
+    } else {
+      regBtn.textContent = "开始报名";
+      regBtn.className = "qr-reg-btn qr-reg-start";
+    }
+  }
+}
+
+function toggleQRDisplay() {
+  let existing = document.querySelector("#qrOverlay");
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  if (!qrDataURL && !connectionInfo) {
+    addQipao("二维码尚未生成，请稍后");
+    return;
+  }
+
+  let overlay = createQROverlay();
+  document.body.appendChild(overlay);
+
+  overlay.querySelector("#qrCloseBtn").addEventListener("click", () => {
+    overlay.remove();
+  });
+
+  overlay.querySelector("#qrRegBtn").addEventListener("click", () => {
+    if (isRegistrationOpen) {
+      if (socket && socket.connected) {
+        socket.emit("display:registration_ended");
+      }
+    } else {
+      if (socket && socket.connected) {
+        socket.emit("display:registration_started");
+      }
+    }
+  });
+}
+
+function showConfirm(message) {
+  return new Promise(function(resolve) {
+    var overlay = document.createElement("div");
+    overlay.className = "confirm-overlay";
+    overlay.innerHTML =
+      '<div class="confirm-dialog">' +
+      '<div class="confirm-body">' +
+      '<div class="confirm-icon warn">!</div>' +
+      '<div class="confirm-message">' + message + '</div>' +
+      '</div>' +
+      '<div class="confirm-footer">' +
+      '<button class="confirm-btn confirm-btn-cancel">取消</button>' +
+      '<button class="confirm-btn confirm-btn-ok">确认</button>' +
+      '</div>' +
+      '</div>';
+
+    document.body.appendChild(overlay);
+
+    overlay.querySelector(".confirm-btn-cancel").addEventListener("click", function() {
+      overlay.remove();
+      resolve(false);
+    });
+    overlay.querySelector(".confirm-btn-ok").addEventListener("click", function() {
+      overlay.remove();
+      resolve(true);
+    });
+    overlay.addEventListener("click", function(e) {
+      if (e.target === overlay) {
+        overlay.remove();
+        resolve(false);
+      }
+    });
+  });
+}
+
+function toggleConfigModal() {
+  var existing = document.querySelector("#configOverlay");
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  var overlay = document.createElement("div");
+  overlay.id = "configOverlay";
+  overlay.className = "config-overlay";
+  overlay.innerHTML =
+    '<div class="config-modal">' +
+    '<div class="config-modal-header">' +
+    '<span class="config-modal-title">抽奖配置</span>' +
+    '<button id="configCloseBtn" class="config-close-btn">&times;</button>' +
+    '</div>' +
+    '<iframe id="configIframe" class="config-iframe" src="/config.html"></iframe>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+
+  overlay.querySelector("#configCloseBtn").addEventListener("click", function() {
+    overlay.remove();
+  });
+
+  overlay.addEventListener("click", function(e) {
+    if (e.target === overlay) overlay.remove();
+  });
+}
+
+function toggleManageResults() {
+  var existing = document.querySelector("#manageOverlay");
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  var overlay = document.createElement("div");
+  overlay.id = "manageOverlay";
+  overlay.className = "manage-overlay";
+  overlay.innerHTML =
+    '<div class="manage-modal">' +
+    '<div class="manage-modal-header">' +
+    '<span class="manage-modal-title">中奖结果管理</span>' +
+    '<button id="manageCloseBtn" class="manage-close-btn">&times;</button>' +
+    '</div>' +
+    '<div class="manage-content" id="manageContent"></div>' +
+    '<div class="manage-footer" id="manageFooter">' +
+    '<span class="manage-selected-count" id="manageSelectedCount">已选 0 人</span>' +
+    '<button id="manageBatchBtn" class="manage-batch-btn" disabled>批量作废</button>' +
+    '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+
+  overlay.querySelector("#manageCloseBtn").addEventListener("click", function() {
+    overlay.remove();
+  });
+  overlay.addEventListener("click", function(e) {
+    if (e.target === overlay) overlay.remove();
+  });
+
+  overlay.querySelector("#manageBatchBtn").addEventListener("click", function() {
+    batchInvalidate();
+  });
+
+  renderManageContent();
+
+  // 监听所有复选框变化，更新计数和按钮状态
+  var content = overlay.querySelector("#manageContent");
+  content.addEventListener("change", function(e) {
+    if (e.target.classList.contains("manage-checkbox")) {
+      updateBatchUI();
+    }
+  });
+}
+
+function renderManageContent() {
+  var content = document.querySelector("#manageContent");
+  if (!content) return;
+
+  var prizesSorted = (prizes || []).slice().sort(function(a, b) { return a.type - b.type; });
+  var hasAny = false;
+  var html = "";
+
+  prizesSorted.forEach(function(prize) {
+    if (prize.type === defaultType) return;
+    var luckyList = basicData.luckyUsers[prize.type];
+    if (!luckyList || luckyList.length === 0) return;
+    hasAny = true;
+    html += '<div class="manage-group">';
+    html += '<div class="manage-group-title">';
+    html += '<label class="manage-select-all-label"><input type="checkbox" class="manage-select-all" data-type="' + prize.type + '"> 全选</label>';
+    html += prize.text + (prize.title ? " " + prize.title : "") + "（" + luckyList.length + "/" + prize.count + "）";
+    html += "</div>";
+    luckyList.forEach(function(user) {
+      html += '<div class="manage-row">';
+      html += '<label class="manage-row-label">';
+      html += '<input type="checkbox" class="manage-checkbox" data-type="' + prize.type + '" data-empid="' + user[0] + '">';
+      html += '<span class="manage-row-info"><span class="emp-id">' + (user[0] || "") + '</span>' + (user[1] || "") + " - " + (user[2] || "") + "</span>";
+      html += "</label>";
+      html += '<button class="manage-invalidate-btn" data-type="' + prize.type + '" data-empid="' + user[0] + '">作废</button>';
+      html += "</div>";
+    });
+    html += "</div>";
+  });
+
+  if (!hasAny) {
+    html = '<div class="manage-empty">暂无中奖记录</div>';
+  }
+
+  content.innerHTML = html;
+
+  // 绑定单个作废按钮事件
+  var btns = content.querySelectorAll(".manage-invalidate-btn");
+  btns.forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      var type = parseInt(this.dataset.type, 10);
+      var empId = this.dataset.empid;
+      invalidateWinner(type, empId);
+    });
+  });
+
+  // 绑定全选复选框事件
+  var selectAlls = content.querySelectorAll(".manage-select-all");
+  selectAlls.forEach(function(sa) {
+    sa.addEventListener("change", function() {
+      var type = this.dataset.type;
+      var checked = this.checked;
+      var checkboxes = content.querySelectorAll(".manage-checkbox[data-type=\"" + type + "\"]");
+      checkboxes.forEach(function(cb) { cb.checked = checked; });
+      updateBatchUI();
+    });
+  });
+
+  updateBatchUI();
+}
+
+function updateBatchUI() {
+  var checked = document.querySelectorAll(".manage-checkbox:checked");
+  var count = checked.length;
+  var countEl = document.querySelector("#manageSelectedCount");
+  var batchBtn = document.querySelector("#manageBatchBtn");
+  if (countEl) countEl.textContent = "已选 " + count + " 人";
+  if (batchBtn) {
+    batchBtn.disabled = count === 0;
+    batchBtn.textContent = count > 0 ? "批量作废（" + count + "）" : "批量作废";
+  }
+}
+
+function batchInvalidate() {
+  var checked = document.querySelectorAll(".manage-checkbox:checked");
+  if (checked.length === 0) return;
+
+  // 收集选中用户信息用于显示
+  var names = [];
+  var items = [];
+  checked.forEach(function(cb) {
+    var row = cb.closest(".manage-row");
+    var info = row ? row.querySelector(".manage-row-info") : null;
+    var name = info ? info.textContent.trim() : "";
+    names.push(name);
+    items.push({ type: parseInt(cb.dataset.type, 10), employeeId: cb.dataset.empid });
+  });
+
+  showConfirm("确认批量作废以下 " + items.length + " 人的中奖记录？\n\n" + names.join("\n") + "\n\n作废后这些人员将不能再次参与抽奖，对应奖项名额将恢复。").then(function(confirmed) {
+    if (!confirmed) return;
+
+    var total = items.length;
+    var done = 0;
+    var failed = [];
+
+    function processNext(index) {
+      if (index >= total) {
+        finishBatch();
+        return;
+      }
+      var item = items[index];
+      window.AJAX({
+        url: "/invalidateWinner",
+        data: { type: item.type, employeeId: String(item.employeeId) },
+        success: function(result) {
+          if (result.type === "success") {
+            done++;
+          } else {
+            failed.push(item.employeeId);
+          }
+          processNext(index + 1);
+        },
+        error: function() {
+          failed.push(item.employeeId);
+          processNext(index + 1);
+        }
+      });
+    }
+
+    function finishBatch() {
+      items.forEach(function(item) {
+        if (failed.indexOf(item.employeeId) !== -1) return;
+        var luckyList = basicData.luckyUsers[item.type];
+        if (luckyList) {
+          var idx = luckyList.findIndex(function(u) { return String(u[0]) === String(item.employeeId); });
+          if (idx !== -1) luckyList.splice(idx, 1);
+        }
+        var allIdx = basicData.allLuckyUsers.findIndex(function(u) { return String(u[0]) === String(item.employeeId); });
+        if (allIdx !== -1) basicData.allLuckyUsers.splice(allIdx, 1);
+      });
+
+      // 将旧卡片移回球面位置，再清空状态
+      var cardsToReset = selectedCardIndex.slice();
+      cardsToReset.forEach(function(idx) {
+        var obj = threeDCards[idx];
+        if (obj && obj.element) obj.element.classList.remove("prize");
+        var target = targets.sphere[idx];
+        if (target) {
+          new TWEEN.Tween(obj.position)
+            .to({ x: target.position.x, y: target.position.y, z: target.position.z }, 400)
+            .easing(TWEEN.Easing.Exponential.InOut)
+            .start();
+          new TWEEN.Tween(obj.rotation)
+            .to({ x: target.rotation.x, y: target.rotation.y, z: target.rotation.z }, 400)
+            .easing(TWEEN.Easing.Exponential.InOut)
+            .start();
+        }
+      });
+      currentLuckys = [];
+      selectedCardIndex = [];
+
+      window.AJAX({
+        url: "/getTempData",
+        success: function(data) {
+          basicData.leftUsers = data.leftUsers;
+        }
+      });
+
+      var newIdx = basicData.prizes.length - 1;
+      for (; newIdx > -1; newIdx--) {
+        var p = basicData.prizes[newIdx];
+        var lucky = basicData.luckyUsers[p.type];
+        if (!lucky || lucky.length < p.count) {
+          break;
+        }
+      }
+      if (newIdx >= 0 && newIdx !== currentPrizeIndex) {
+        currentPrizeIndex = newIdx;
+        currentPrize = basicData.prizes[currentPrizeIndex];
+      }
+
+      resetPrize(currentPrizeIndex);
+      var curLucky = basicData.luckyUsers[currentPrize.type];
+      setPrizeData(currentPrizeIndex, curLucky ? curLucky.length : 0, true);
+
+      renderManageContent();
+
+      if (failed.length > 0) {
+        addQipao("批量作废完成：" + done + " 人成功，" + failed.length + " 人失败");
+      } else {
+        addQipao("批量作废完成，共作废 " + done + " 人");
+      }
+    }
+
+    processNext(0);
+  });
+}
+
+function invalidateWinner(type, employeeId) {
+  var user = null;
+  var luckyList = basicData.luckyUsers[type];
+  if (luckyList) {
+    user = luckyList.find(function(item) { return String(item[0]) === String(employeeId); });
+  }
+  var userName = user ? user[1] : employeeId;
+
+  showConfirm("确认作废 [" + userName + "] 的中奖记录？\n\n作废后该人员将不能再次参与抽奖，对应奖项名额将恢复。").then(function(confirmed) {
+    if (!confirmed) return;
+
+    window.AJAX({
+      url: "/invalidateWinner",
+      data: { type: type, employeeId: String(employeeId) },
+      success: function(result) {
+        if (result.type === "success") {
+          if (luckyList) {
+            var idx = luckyList.findIndex(function(item) { return String(item[0]) === String(employeeId); });
+            if (idx !== -1) luckyList.splice(idx, 1);
+          }
+          var allIdx = basicData.allLuckyUsers.findIndex(function(item) { return String(item[0]) === String(employeeId); });
+          if (allIdx !== -1) basicData.allLuckyUsers.splice(allIdx, 1);
+
+          // 将旧卡片移回球面位置，再清空状态
+          var cardsToReset = selectedCardIndex.slice();
+          cardsToReset.forEach(function(idx) {
+            var obj = threeDCards[idx];
+            if (obj && obj.element) obj.element.classList.remove("prize");
+            var target = targets.sphere[idx];
+            if (target) {
+              new TWEEN.Tween(obj.position)
+                .to({ x: target.position.x, y: target.position.y, z: target.position.z }, 400)
+                .easing(TWEEN.Easing.Exponential.InOut)
+                .start();
+              new TWEEN.Tween(obj.rotation)
+                .to({ x: target.rotation.x, y: target.rotation.y, z: target.rotation.z }, 400)
+                .easing(TWEEN.Easing.Exponential.InOut)
+                .start();
+            }
+          });
+          currentLuckys = [];
+          selectedCardIndex = [];
+
+          window.AJAX({
+            url: "/getTempData",
+            success: function(data) {
+              basicData.leftUsers = data.leftUsers;
+            }
+          });
+
+          var newIdx = basicData.prizes.length - 1;
+          for (; newIdx > -1; newIdx--) {
+            var p = basicData.prizes[newIdx];
+            var lucky = basicData.luckyUsers[p.type];
+            if (!lucky || lucky.length < p.count) {
+              break;
+            }
+          }
+          if (newIdx >= 0 && newIdx !== currentPrizeIndex) {
+            currentPrizeIndex = newIdx;
+            currentPrize = basicData.prizes[currentPrizeIndex];
+          }
+
+          resetPrize(currentPrizeIndex);
+          var curLucky = basicData.luckyUsers[currentPrize.type];
+          setPrizeData(currentPrizeIndex, curLucky ? curLucky.length : 0, true);
+
+          renderManageContent();
+
+          addQipao("已作废 [" + userName + "] 的中奖记录");
+        } else {
+          addQipao(result.message || "作废失败");
+        }
+      },
+      error: function() {
+        addQipao("网络错误，作废失败");
+      }
+    });
+  });
+}
+
+// 监听来自 config iframe 的保存成功消息
+window.addEventListener("message", function(e) {
+  if (e.data === "config_saved") {
+    addQipao("配置已更新，正在刷新...");
+    setTimeout(function() { location.reload(); }, 500);
+  }
+});
+
+// 导入用户列表文件处理
+document.addEventListener("DOMContentLoaded", function() {
+  var usersFileInput = document.querySelector("#usersFileInput");
+  if (usersFileInput) {
+    usersFileInput.addEventListener("change", function() {
+      var file = this.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        fetch("/uploadUsers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileName: file.name, data: e.target.result })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(result) {
+          if (result.type === "success") {
+            addQipao(result.message || "导入成功");
+            // 重置本地数据
+            basicData.luckyUsers = {};
+            basicData.allLuckyUsers = [];
+            basicData.participants = [];
+            currentLuckys = [];
+            currentPrizeIndex = basicData.prizes.length - 1;
+            currentPrize = basicData.prizes[currentPrizeIndex];
+            isLotteryStarted = false;
+            isRegistrationOpen = false;
+            totalUsers = result.totalUsers || 0;
+            recentJoins = [];
+            resetPrize(currentPrizeIndex);
+            addHighlight();
+            switchScreen("enter");
+            // 重新拉取用户
+            window.AJAX({
+              url: "/getUsers",
+              success: function(users) {
+                basicData.users = users;
+                basicData.leftUsers = Object.assign([], users);
+                // 刷新名牌
+                threeDCards.forEach(function(obj, idx) {
+                  var u = users[idx % users.length];
+                  if (u) changeCard(idx, u);
+                });
+              }
+            });
+            window.AJAX({
+              url: "/getTempData",
+              success: function(tempData) {
+                basicData.leftUsers = tempData.leftUsers;
+              }
+            });
+          } else {
+            addQipao(result.message || "导入失败");
+          }
+        })
+        .catch(function() {
+          addQipao("网络错误，导入失败");
+        });
+      };
+      reader.readAsDataURL(file);
+      this.value = "";
+    });
+  }
+});
 
 let onload = window.onload;
 

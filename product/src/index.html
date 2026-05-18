@@ -35,11 +35,19 @@
       <div id="lotteryBar" class="none">
         <button id="lottery">开始抽奖</button>
         <button id="reLottery">重新抽奖</button>
+        <button id="saveData">保存结果</button>
+        <button id="manageResults">管理结果</button>
         <div class="fixed-bar">
           <button id="save" class="fixed-btn">导出抽奖结果</button>
           <button id="reset" class="fixed-btn">重置</button>
         </div>
       </div>
+      <div id="topBar" style="position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:10;display:flex;gap:8px;">
+        <button id="qrCode" style="padding:8px 20px;font-size:14px;background:rgba(0,127,127,0.3);color:rgba(127,255,255,0.8);border:1px solid rgba(127,255,255,0.3);border-radius:6px;cursor:pointer;">显示二维码</button>
+        <button id="config" style="padding:8px 20px;font-size:14px;background:rgba(0,127,127,0.3);color:rgba(127,255,255,0.8);border:1px solid rgba(127,255,255,0.3);border-radius:6px;cursor:pointer;">配置</button>
+        <button id="importUsers" style="padding:8px 20px;font-size:14px;background:rgba(0,127,127,0.3);color:rgba(127,255,255,0.8);border:1px solid rgba(127,255,255,0.3);border-radius:6px;cursor:pointer;">导入用户</button>
+      </div>
+      <input type="file" id="usersFileInput" accept=".xlsx,.xls" style="display:none;">
     </div>
 
     <div class="qipao-container"></div>

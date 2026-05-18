@@ -10,7 +10,12 @@ module.exports = merge(baseConfig, {
     port: 9000,
     open: true,
     proxy: {
-      "*": "http://localhost:18888"
+      "*": {
+        target: "http://localhost:18888",
+        bypass: function(req) {
+          if (req.url.indexOf("sockjs-node") !== -1) return false;
+        }
+      }
     },
     before() {
       serve.run(18888, "n");

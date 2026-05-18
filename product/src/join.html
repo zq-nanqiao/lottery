@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>加入抽奖</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: linear-gradient(to bottom, #131313, #02101c);
+      color: rgba(127,255,255,0.85);
+      font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      width: 100%;
+      max-width: 380px;
+      padding: 24px;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .header h1 {
+      font-size: 24px;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+    .header p {
+      font-size: 14px;
+      color: rgba(127,255,255,0.5);
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 8px;
+      color: rgba(127,255,255,0.7);
+    }
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      padding: 14px 16px;
+      font-size: 16px;
+      background: rgba(0,127,127,0.1);
+      border: 1px solid rgba(127,255,255,0.2);
+      border-radius: 8px;
+      color: #fff;
+      outline: none;
+      transition: border-color 0.3s;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .form-group select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='rgba(127,255,255,0.5)' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 16px center;
+      cursor: pointer;
+    }
+    .form-group select option {
+      background: #1a2a2a;
+      color: #fff;
+    }
+    .form-group input:focus,
+    .form-group select:focus {
+      border-color: rgba(127,255,255,0.6);
+    }
+    .form-group input::placeholder {
+      color: rgba(127,255,255,0.3);
+    }
+    button {
+      width: 100%;
+      padding: 14px;
+      font-size: 18px;
+      background: rgba(0,127,127,0.4);
+      color: rgba(127,255,255,0.9);
+      border: 1px solid rgba(127,255,255,0.3);
+      border-radius: 8px;
+      cursor: pointer;
+      margin-top: 12px;
+      transition: background 0.3s;
+    }
+    button:active {
+      background: rgba(0,127,127,0.7);
+    }
+    button:disabled {
+      opacity: 0.5;
+    }
+    .message-box {
+      display: none;
+      text-align: center;
+      margin-top: 20px;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 15px;
+    }
+    .message-box.success {
+      display: block;
+      background: rgba(0,200,100,0.15);
+      color: #00cc66;
+      border: 1px solid rgba(0,200,100,0.3);
+    }
+    .message-box.error {
+      display: block;
+      background: rgba(200,50,50,0.15);
+      color: #ff6666;
+      border: 1px solid rgba(200,50,50,0.3);
+    }
+    .back-link {
+      text-align: center;
+      margin-top: 24px;
+    }
+    .back-link a {
+      color: rgba(127,255,255,0.4);
+      font-size: 13px;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>加入年会抽奖</h1>
+      <p>请填写工号、姓名和部门完成报名</p>
+    </div>
+    <form id="joinForm">
+      <div class="form-group">
+        <label>工号 *</label>
+        <input type="text" id="empIdInput" required placeholder="请输入你的工号" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>姓名 *</label>
+        <input type="text" id="nameInput" required placeholder="请输入你的姓名" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>部门 *</label>
+        <select id="deptInput" required>
+          <option value="">请选择部门</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>祝福语（选填，最多20字）</label>
+        <input type="text" id="blessingInput" maxlength="20" placeholder="留下对公司的祝福吧" autocomplete="off">
+      </div>
+      <button type="submit" id="submitBtn">报名参加</button>
+    </form>
+    <div id="messageBox" class="message-box"></div>
+  </div>
+  <script>
+    loadDepartments();
+
+    document.getElementById("empIdInput").addEventListener("keydown", function(e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        var empId = this.value.trim();
+        if (!empId) return;
+        fetch("/lookupUser", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ employeeId: empId })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.type === "success") {
+            document.getElementById("nameInput").value = data.name;
+            document.getElementById("deptInput").value = data.department;
+          }
+        });
+      }
+    });
+
+    function loadDepartments() {
+      fetch("/getDepartments", { method: "POST" })
+        .then(function(r) { return r.json(); })
+        .then(function(departments) {
+          var select = document.getElementById("deptInput");
+          select.innerHTML = '<option value="">请选择部门</option>';
+          departments.forEach(function(dept) {
+            var opt = document.createElement("option");
+            opt.value = dept;
+            opt.textContent = dept;
+            select.appendChild(opt);
+          });
+        })
+        .catch(function() {
+          showMessage("加载部门列表失败，请刷新重试", "error");
+        });
+    }
+
+    document.getElementById("joinForm").onsubmit = function(e) {
+      e.preventDefault();
+      var empId = document.getElementById("empIdInput").value.trim();
+      var name = document.getElementById("nameInput").value.trim();
+      var dept = document.getElementById("deptInput").value;
+      var blessing = document.getElementById("blessingInput").value.trim();
+      if (!empId) {
+        showMessage("请输入工号", "error");
+        return;
+      }
+      if (!name) {
+        showMessage("请输入姓名", "error");
+        return;
+      }
+      if (!dept) {
+        showMessage("请选择部门", "error");
+        return;
+      }
+
+      var btn = document.getElementById("submitBtn");
+      btn.disabled = true;
+      btn.textContent = "提交中...";
+
+      fetch("/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employeeId: empId, name: name, department: dept, blessing: blessing })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.type === "success") {
+          showMessage("报名成功！" + name + "，欢迎参加抽奖！", "success");
+          document.getElementById("empIdInput").value = "";
+          document.getElementById("nameInput").value = "";
+          document.getElementById("deptInput").value = "";
+          document.getElementById("blessingInput").value = "";
+        } else {
+          showMessage(data.message || "报名失败，请重试", "error");
+        }
+      })
+      .catch(function() {
+        showMessage("网络错误，请重试", "error");
+      })
+      .finally(function() {
+        btn.disabled = false;
+        btn.textContent = "报名参加";
+      });
+    };
+
+    function showMessage(text, type) {
+      var box = document.getElementById("messageBox");
+      box.textContent = text;
+      box.className = "message-box " + (type || "");
+      box.style.display = "block";
+      if (type === "success") {
+        setTimeout(function() { box.style.display = "none"; }, 4000);
+      }
+    }
+  </script>
+</body>
+</html>
